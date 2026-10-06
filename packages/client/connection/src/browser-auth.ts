@@ -191,7 +191,10 @@ export class BrowserAuth {
     private readonly secret: Buffer,
     maxAgeDays: number,
   ) {
-    this.launchToken = processLaunchToken(processOwner)
+    // Deployment override: a non-empty DSH_LAUNCH_TOKEN pins the bootstrap
+    // credential so the printed login URL survives restarts; unset keeps the
+    // per-process random token.
+    this.launchToken = process.env.DSH_LAUNCH_TOKEN || processLaunchToken(processOwner)
     this.maxAgeMilliseconds = maxAgeDays * DAY_MILLISECONDS
     if (!Number.isSafeInteger(this.maxAgeMilliseconds)
       || !Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
