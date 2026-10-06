@@ -1,6 +1,7 @@
 // Composer statistics pills, each its own 'conversation.composer.dock' list
-// entry (activity, usage) so a plugin can replace or add one pill by id.
-// Compact keeps speed and cache hit as plain readings; Detailed adds counts,
+// entry (activity, usage) so a plugin can replace or add one pill by id; the
+// balance entry (BalancePill.tsx) reuses the shared pill pair below. Compact
+// keeps speed and cache hit as plain readings; Detailed adds counts,
 // token totals, and click-open dialogs. Settled-node identity prevents
 // stream-delta updates from rerendering the pills.
 
@@ -130,9 +131,10 @@ export interface StatPillProps extends InjectFace<PerformanceUsageInjected> {
 }
 
 /** Dock entry id carried as `data-composer-stat` on each pill. */
-type StatId = 'activity' | 'usage'
+export type StatId = 'activity' | 'usage' | 'balance'
 
-interface PillContent {
+/** Content every composer stat pill shares, independent of its dialog rows. */
+export interface PillContent {
   stat: StatId
   icon: ReactNode
   label: ReactNode
@@ -179,7 +181,7 @@ function decodeSpeed(stats: WindowStats, t: Translate): string {
 const FULL_READING_TOOLTIP = { side: 'top', portal: true, delayMs: 200, onlyWhenClipped: true } as const
 
 /** A static reading: used when the pill has no dialog rows or the mode is Compact. */
-function PlainPill({ stat, icon, label, text }: PillContent) {
+export function PlainPill({ stat, icon, label, text }: PillContent) {
   return (
     <span className={css.anchor} data-composer-stat={stat}>
       {/* No dialog carries a static reading, so a tap also pins the full text. */}
@@ -198,7 +200,7 @@ function PlainPill({ stat, icon, label, text }: PillContent) {
  * state; useStatDialog closes it on Escape or an outside pointerdown or click,
  * so at most one dialog is open across the dock.
  */
-function DialogPill({ stat, icon, label, text, title, titleValue, children }: PillContent & {
+export function DialogPill({ stat, icon, label, text, title, titleValue, children }: PillContent & {
   title: string
   titleValue?: string
   children: ReactNode

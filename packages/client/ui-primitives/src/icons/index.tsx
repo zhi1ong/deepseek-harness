@@ -614,3 +614,9 @@ export const IconSaveOutlineRegular = productIcon('save-outline', 'regular')
 
 /** Medium floppy-disk save action. */
 export const IconSaveOutlineMedium = productIcon('save-outline', 'medium')
+
+/** Regular one-pixel IconWalletOutline artwork. */
+export const IconWalletOutlineRegular = productIcon('wallet-outline', 'regular')
+
+/** Medium IconWalletOutline artwork with a 1.3px stroke. */
+export const IconWalletOutlineMedium = productIcon('wallet-outline', 'medium')

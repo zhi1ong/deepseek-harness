@@ -4,13 +4,18 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { isRunningAccountTask } from '@deepseek-ai/dsh-deepseek-account'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { AccountBonusBatch, AccountBonusOrderId, AccountClientMetadata, AccountDetails, AccountUserId } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { AccountView, SignInAttemptId } from './types.ts'
+import { ApiBalanceReader } from './api-balance.ts'
+import type { AccountView, ApiBalanceView, SignInAttemptId } from './types.ts'
 
 /** Account commands and reconnect-safe state stream. */
 export class AccountController extends TypertRemoteService {
-  static inject = ['deepseekAccount', 'agents']
+  static inject = ['deepseekAccount', 'agents', 'llm']
+  private readonly apiBalance: ApiBalanceReader
   /** @param ctx - Host with the account provider mounted. */
-  constructor(ctx: Context) { super(ctx, 'accountController', { namespace: 'account' }) }
+  constructor(ctx: Context) {
+    super(ctx, 'accountController', { namespace: 'account' })
+    this.apiBalance = new ApiBalanceReader(ctx)
+  }
   /**
    * Read the safe account projection.
    * @returns current account and attempt state.
@@ -35,6 +40,12 @@ export class AccountController extends TypertRemoteService {
   getBalance(client: AccountClientMetadata): Promise<AccountDetails['balance'] | null> {
     return this.ctx.deepseekAccount.getBalance(client)
   }
+  /**
+   * Query the API-key DeepSeek wallet balance for the official provider route.
+   * @returns the latest reading, the last success while a fetch fails, or null while the route is unconfigured.
+   */
+  @Remote
+  getApiBalance(): Promise<ApiBalanceView | null> { return this.apiBalance.read() }
   /**
    * Query the granted bonuses Platform has not yet recorded as displayed.
    * @param client - identity of the requesting UI; its language selects the server-authored message.

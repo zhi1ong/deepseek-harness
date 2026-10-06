@@ -122,6 +122,8 @@ export const ICON_ARTWORK = {
     : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}"><rect x="5" y="1.5" width="6" height="9" rx="3"></rect><path d="M2.35 8.675C3.075 11.3 5.2 13.125 8 13.125C10.8 13.125 12.925 11.3 13.65 8.675M8 13.125V15"></path></svg>` },
   'apps-add-outline': { size: 16, svg: strokeWidth => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}"><rect x="2.25" y="2.25" width="4" height="4" rx="1"></rect><rect x="2.25" y="9.75" width="4" height="4" rx="1"></rect><rect x="9.75" y="9.75" width="4" height="4" rx="1"></rect><path d="M11.75 1.75v5M9.25 4.25h5"></path></svg>` },
   'apps-add-compact-outline': { size: 16, svg: strokeWidth => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}"><rect x="2.75" y="2.75" width="4" height="4" rx="1"></rect><rect x="2.75" y="9.25" width="4" height="4" rx="1"></rect><rect x="9.25" y="9.25" width="4" height="4" rx="1"></rect><path d="M11.25 2.25v5M8.75 4.75h5"></path></svg>` },
+  // Lucide wallet-minimal (ISC): native 24-grid geometry, with its stroke scaled to the 16px set.
+  'wallet-outline': { size: 16, svg: strokeWidth => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth * 1.5}" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14h.01"></path><path d="M7 7h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14"></path></svg>` },
 } satisfies Record<string, IconArtwork>
 
 /** Glyph name accepted by {@link iconSymbolId}. */

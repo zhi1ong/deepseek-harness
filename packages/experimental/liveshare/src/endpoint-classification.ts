@@ -85,6 +85,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'account/ackBonusNotified': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/cancelSignIn': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/getBalance': 'owner-only', // owner account and sign-in; the served page never reads it
+  'account/getApiBalance': 'owner-only', // owner API-key wallet; the served page never reads it
   'account/getProfile': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/getState': 'owner-only', // owner account and sign-in; the served page never reads it
   'account/getUnnotifiedBonuses': 'owner-only', // owner account and sign-in; the served page never reads it

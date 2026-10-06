@@ -22,6 +22,8 @@ kind: "package-reference"
 
 account 命名空间提供 getState、getProfile / getBalance、getUnnotifiedBonuses、ackBonusNotified、startSignIn、cancelSignIn、signOut 和 watch。watch 先发送完整初始状态，随后发送完整状态变化；断开连接只停止观察，不取消登录。取消操作必须指定尝试 ID，防止旧页面取消新登录。账号缺失或已切换时 getUnnotifiedBonuses 返回 null、ackBonusNotified 返回 false；需要调用方重试的失败以抛出的 Remote 错误返回。
 
+`getApiBalance` 走官方 API-key 路由读取平台 `user/balance` 接口。路由门控任一不满足即返回 null 而非错误：`deepseek-official` provider 缺失、key 引用未配置、或端点指向自定义网关。读取请求在飞行中去重，一次成功结果服务五秒，之后的失败保留上一次成功值。key、适配器或设置变化时，通过 credentials、LLM、settings 事件丢弃缓存。
+
 到达 Platform 的每个操作都接收调用界面的 `AccountClientMetadata`——客户端版本、当前语言和以秒为单位的 UTC 偏移——因此 Host 报告的是发起请求的界面，而不是它上一次见到的调用方。取消和 watch 不接该参数，因为它们不会到达 Platform。
 
 `watchExpiry` 仅发送实时凭据失效通知，不发送初始值，也不重放历史通知。桌面端通过该流，在切换到 Welcome 时交接一次性 toast。
@@ -31,7 +33,7 @@ account 命名空间提供 getState、getProfile / getBalance、getUnnotifiedBon
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-控制器向账号服务转发操作，不维护独立的账号状态。
+控制器向账号服务转发账号操作，不维护独立的账号状态；API-key 余额读取由其 `ApiBalanceReader` 持有，负责路由门控、取数与读缓存。
 
 <a id="further-exploration"></a>
 ## 深入探索
