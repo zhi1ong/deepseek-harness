@@ -63,20 +63,22 @@ describe('developer tools settings', () => {
     expect(ctx.configForms.developerTools.enabled.getSnapshot()).toBe(false)
   })
 
-  it('shares one remote-browser preference across consumers and disposes it with the plugin', async () => {
+  it('shares the Host-backed preference across consumers and disposes it with the plugin', async () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
-    const describeCall = vi.fn()
+    const describeCall = vi.fn(() => Promise.resolve({
+      ok: true, value: { writable: true, hasDocument: true, namespaces: [] },
+    }))
     const remote = new TestRemote(ctx, { settings: { describe: describeCall } })
     remote.$host = { home: undefined, isLoopback: false }
     const fiber = ctx.plugin({ inject, apply: clientApply })
     await fiber.await()
     const preference = ctx.configForms.developerTools
     expect(fiber.ctx.configForms.developerTools.enabled).toBe(preference.enabled)
-    expect(preference.enabled.getSnapshot()).toBe(true)
-    await preference.setEnabled(true)
-    expect(fiber.ctx.configForms.developerTools.enabled.getSnapshot()).toBe(true)
-    expect(describeCall).not.toHaveBeenCalled()
+    // LAN custom: an off-loopback page still reads the Host document, and a
+    // section absent from the document leaves the feature disabled.
+    await vi.waitFor(() => { expect(describeCall).toHaveBeenCalled() })
+    expect(preference.enabled.getSnapshot()).toBe(false)
     await fiber.dispose()
     expect(ctx.get('configForms')).toBeUndefined()
   })

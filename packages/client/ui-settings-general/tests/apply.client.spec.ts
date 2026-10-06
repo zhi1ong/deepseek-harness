@@ -188,16 +188,18 @@ describe('ui-settings-general apply', () => {
     await vi.waitFor(() => { expect(c.mock.log.calls('settings/describe')).toHaveLength(3) })
   })
 
-  it('withholds the Host document action off-loopback', async ({ mock, start }) => {
+  it('serves the Host document action from any page', async ({ mock, start }) => {
     const loopbackUrl = location.href
     setPageUrl('http://198.51.100.7:3000/')
     onTestFinished(() => { setPageUrl(loopbackUrl) })
     const { c } = await client(mock, start)
     expect(c.connection.isLoopback).toBe(false)
-    expect(ownEntries(c, 'settings.action')).toEqual([])
-    // Off-loopback settings stay process-local: no describe read, so the browser language stands.
-    expect(c.mock.log.calls('settings/describe')).toEqual([])
-    expect(c.ctx.locale.getSnapshot().active).toBe('en')
+    expect(ownEntries(c, 'settings.action')).toHaveLength(1)
+    // LAN custom: the Host document loads from any page, so the locale
+    // follows the Host preference ('zh' in this mock) instead of standing on
+    // the browser language.
+    await vi.waitFor(() => { expect(c.mock.log.calls('settings/describe').length).toBeGreaterThan(0) })
+    expect(c.ctx.locale.getSnapshot().active).toBe('zh')
     await c.unload(SELF)
     await c.flush()
     for (const [name] of SEATS) expect(ownEntries(c, name)).toEqual([])

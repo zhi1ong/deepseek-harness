@@ -243,8 +243,22 @@ describe('ui-settings-models apply', () => {
     expect(() => b.locale.register('settings.models', 'en', {})).not.toThrow()
   })
 
-  it('keeps remote-browser acknowledgement in process memory', async () => {
-    const b = await bench(false)
+  it('follows the durable Host welcome section from any page', async () => {
+    const mock = RemoteMock.create().load(remoteDefaultResponses)
+    const namespace = {
+      ns: WELCOME_NOTICE_SETTINGS_NAMESPACE,
+      schema: JSON.parse(JSON.stringify(Schema.object({ [WELCOME_NOTICE_ACK_FIELD]: Schema.string() }).toJSON())) as JsonValue,
+      value: {},
+      autoGenerate: true, applies: 'live' as const,
+      secrets: [],
+      revision: 0,
+    }
+    mock.remote.settings.describe.mockResolvedValue(ok({
+      writable: true, hasDocument: false, namespaces: [namespace],
+    }))
+    // LAN custom: the mirror is Host-backed from any page, so an off-loopback
+    // browser follows the durable welcome section instead of process memory.
+    const b = await bench(false, mock)
     declare(b.slots)
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const entry = b.slots.entries('settings.onboarding')
@@ -254,8 +268,10 @@ describe('ui-settings-models apply', () => {
     )()
 
     await injected.controller.load()
-    expect(injected.controller.store.getSnapshot()).toEqual({
-      status: 'ready', acknowledged: false, error: null,
+    await vi.waitFor(() => {
+      expect(injected.controller.store.getSnapshot()).toEqual({
+        status: 'ready', acknowledged: false, error: null,
+      })
     })
   })
 })
