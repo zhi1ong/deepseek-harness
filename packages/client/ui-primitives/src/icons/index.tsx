@@ -1656,3 +1656,24 @@ export const IconMicrophoneOutlineRegular = (props: IconProps) => (
 export const IconMicrophoneOutlineMedium = (props: IconProps) => (
   <IconMicrophoneOutlineArtwork {...props} strokeWidth={ICON_MEDIUM_STROKE} />
 )
+
+// Lucide `wallet-minimal` geometry (lucide-static v1.52.0, ISC), kept on its
+// native 24 grid: the 1.5x strokeWidth maps that grid onto the 16-grid weight
+// the rest of this set carries, and the round caps and joins are the upstream
+// design's own.
+const IconWalletOutlineArtwork = ({ size = 16, className, strokeWidth }: WeightedIconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth * 1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17 14h.01" />
+    <path d="M7 7h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14" />
+  </svg>
+)
+
+/** Lucide wallet-minimal with uniform one-pixel strokes. */
+export const IconWalletOutlineRegular = (props: IconProps) => (
+  <IconWalletOutlineArtwork {...props} strokeWidth={ICON_REGULAR_STROKE} />
+)
+
+/** Lucide wallet-minimal with uniform 1.3px strokes. */
+export const IconWalletOutlineMedium = (props: IconProps) => (
+  <IconWalletOutlineArtwork {...props} strokeWidth={ICON_MEDIUM_STROKE} />
+)

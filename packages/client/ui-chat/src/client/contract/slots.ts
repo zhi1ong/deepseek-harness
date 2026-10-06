@@ -1,4 +1,5 @@
 /** Chat-owned Slot declarations and composed component props. */
+import type { ApiBalanceView } from '@deepseek-ai/dsh-api-account-controller/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -225,6 +226,14 @@ export interface PerformanceUsageInjected {
   hooks: {
     /** Accepted performance and usage detail preference. */
     performanceUsage: ObservableSnapshot<PerformanceUsageMode>
+  }
+}
+
+/** Shared wallet-balance reading for the composer balance pill. */
+export interface BalanceInjected {
+  hooks: {
+    /** Latest API-key DeepSeek wallet reading; null while unavailable. */
+    balance: ObservableSnapshot<ApiBalanceView | null>
   }
 }
 

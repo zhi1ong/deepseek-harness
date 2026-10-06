@@ -2,6 +2,7 @@
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { ApiBalanceView } from '@deepseek-ai/dsh-api-account-controller/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { GroupKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -27,6 +28,7 @@ import type {
 import type { ChatSnapshot } from './contract/snapshot.ts'
 import { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'
 import { ApprovalCommand } from './chat/ApprovalCommand.tsx'
+import { BalancePill } from './chat/BalancePill.tsx'
 import { ChatView } from './chat/ChatView.tsx'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { ActivityPill, UsagePill } from './chat/StatsPills.tsx'
@@ -56,7 +58,7 @@ const CHAT_NODE_INJECT: ChatNodeInjected = {
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiWorkspace', 'uiSession', 'uiConversation', 'locale',
-  'configForms', 'remote', 'remote.session', 'sidebarRight',
+  'configForms', 'remote', 'remote.account', 'remote.session', 'sidebarRight',
 ]
 
 /**
@@ -75,6 +77,19 @@ export function apply(ctx: Context): void {
   ctx.effect(() => async () => {
     await Promise.all([...quotaSubscriptions].map(dispose => dispose()))
   }, 'ui-chat: live quota notices')
+  // One shared wallet-balance reading for the composer balance pill: read
+  // once at boot, once per connection generation, and once per settled turn.
+  // A superseded response never lands, and failed calls keep the last reading.
+  const balance = createSnapshotStore<ApiBalanceView | null>(null)
+  let balanceRevision = 0
+  const refreshBalance = (): void => {
+    const generation = ++balanceRevision
+    void ctx.remote.account.getApiBalance().then((result) => {
+      if (generation === balanceRevision && result.ok) balance.set(result.value)
+    }).catch(() => { /* transport drop keeps the last reading */ })
+  }
+  ctx.on('connection/reset', () => { refreshBalance() })
+  refreshBalance()
   const chatSource = (binding: SessionBinding): ObservableSnapshot<ChatSnapshot> => {
     let source = chatSources.get(binding)
     if (source === undefined) {
@@ -86,7 +101,11 @@ export function apply(ctx: Context): void {
           const { change } = binding.eventSource.getSnapshot()
           if (change.kind !== 'append') return
           for (const { event } of change.entries) {
-            if (event.type !== 'turn/end' || event.data.reason.kind !== 'error') continue
+            if (event.type !== 'turn/end') continue
+            // Every settled turn refreshes the wallet reading; the
+            // append-only guard above keeps replayed history from counting.
+            refreshBalance()
+            if (event.data.reason.kind !== 'error') continue
             const { code } = event.data.reason.error
             if (quotaNoticeHolds.size > 0 || (code !== 'QUOTA' && code !== 'ACCOUNT_QUOTA')) continue
             quotaNotice.set({ code, seq: ++quotaNoticeSeq })
@@ -283,6 +302,7 @@ export function apply(ctx: Context): void {
 
   // One dock entry per pill, so a plugin replaces or adds a single pill by id.
   const statPillInject = () => ({ hooks: { performanceUsage } })
+  const balancePillInject = () => ({ hooks: { balance } })
   ctx.slots.inject('conversation.composer.dock', function* () {
     yield ctx.slots.register({
       name: 'conversation.composer.dock', id: 'activity', order: 0, locale: NS, inject: statPillInject,
@@ -290,6 +310,9 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({
       name: 'conversation.composer.dock', id: 'usage', order: 1, locale: NS, inject: statPillInject,
     }, UsagePill)
+    yield ctx.slots.register({
+      name: 'conversation.composer.dock', id: 'balance', order: 2, locale: NS, inject: balancePillInject,
+    }, BalancePill)
   })
 
   ctx.slots.inject('conversation.approval.detail', () =>

@@ -9,6 +9,8 @@ import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-tes
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { PartialArguments } from '@deepseek-ai/dsh-util-values'
+import type { ApiBalanceView } from '@deepseek-ai/dsh-api-account-controller/types'
+import { BalancePill, type BalancePillProps } from '../src/client/chat/BalancePill.tsx'
 import { ActivityPill, UsagePill, deriveStats, formatDuration, type StatPillProps } from '../src/client/chat/StatsPills.tsx'
 import { formatTokens } from '../src/client/chat/token-format.ts'
 import { en, zh } from '../src/client/locale.ts'
@@ -504,5 +506,63 @@ describe('composer stats pills', () => {
     act(() => { set({ partial: { turn: 1, step: 2, blocks: [{ kind: 'text', text: 'a' }] } }) })
     act(() => { set({ partial: { turn: 1, step: 2, blocks: [{ kind: 'text', text: 'ab' }] } }) })
     expect(renders).toBe(before)
+  })
+})
+
+describe('composer balance pill', () => {
+  const BALANCE: ApiBalanceView = {
+    currency: 'CNY', total: '110.00', granted: '10.00', toppedUp: '100.00', isAvailable: true, fetchedAt: 1_000_000_000_000,
+  }
+
+  /** The balance pill's props with a stubbed reading seat and projection table. */
+  function balanceProps(
+    balance: ApiBalanceView | null,
+    values: Record<string, unknown> = { modelSelection: { lastUsed: null, next: { provider: 'deepseek-official', model: 'deepseek-chat' } } },
+    locale: 'zh' | 'en' = 'en',
+  ): BalancePillProps {
+    return {
+      useBalance: selector => selector(balance),
+      useProjection: (key: string, selector?: (value: never) => unknown) =>
+        selector === undefined ? values[key] : selector(values[key] as never),
+      t: locale === 'zh' ? t : tEn,
+    }
+  }
+
+  it('renders the official-route reading and opens the wallet breakdown', () => {
+    const view = render(<BalancePill {...balanceProps(BALANCE)} />)
+    expect(view.getByRole('button').textContent).toBe('Balance ¥110.00')
+    fireEvent.click(view.getByRole('button'))
+    const dialog = view.getByRole('dialog')
+    expect(dialog.textContent).toContain('Total balance¥110.00')
+    expect(dialog.textContent).toContain('Recharge balance100.00')
+    expect(dialog.textContent).toContain('Granted balance10.00')
+    expect(dialog.textContent).toMatch(/Updated\d{2}:\d{2}:\d{2}/)
+    expect(dialog.textContent).not.toContain('insufficient')
+  })
+
+  it('keeps omitted wallet components and the insufficient note honest', () => {
+    const view = render(<BalancePill {...balanceProps({
+      currency: 'USD', total: '0.00', granted: null, toppedUp: null, isAvailable: false, fetchedAt: 0,
+    })} />)
+    fireEvent.click(view.getByRole('button'))
+    const dialog = view.getByRole('dialog')
+    expect(view.getByRole('button').textContent).toBe('Balance $0.00')
+    expect(dialog.textContent).toContain('Recharge balance—')
+    expect(dialog.textContent).toContain('Granted balance—')
+    expect(dialog.textContent).toContain('insufficient for API calls')
+  })
+
+  it('renders the localized label', () => {
+    const view = render(<BalancePill {...balanceProps(BALANCE, undefined, 'zh')} />)
+    expect(view.getByRole('button').textContent).toBe('余额 ¥110.00')
+  })
+
+  it('hides the pill off the official routes and while no reading exists', () => {
+    const offRoute = render(<BalancePill {...balanceProps(BALANCE, {
+      modelSelection: { lastUsed: null, next: { provider: 'custom-gateway', model: 'x' } },
+    })} />)
+    expect(offRoute.container.textContent).toBe('')
+    const unread = render(<BalancePill {...balanceProps(null)} />)
+    expect(unread.container.textContent).toBe('')
   })
 })

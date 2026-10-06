@@ -8,9 +8,10 @@ import {
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionBinding, SessionLiveEventEntry } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import type {} from '@deepseek-ai/dsh-client-connection/client'
 import {
   apply as applyConversation, inject as injectConversation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -25,7 +26,9 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { QuotaNoticeInjected } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { PerformanceUsageRowInjected } from '../src/client/settings/PerformanceUsageRow.tsx'
+import type { ApiBalanceView } from '@deepseek-ai/dsh-api-account-controller/types'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../src/chat-settings.ts'
+import { BalancePill } from '../src/client/chat/BalancePill.tsx'
 import { ActivityPill, UsagePill } from '../src/client/chat/StatsPills.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
@@ -63,8 +66,11 @@ async function bench() {
     }),
     openSession,
   } as never)
+  type BalanceResult = { ok: true; value: ApiBalanceView | null } | { ok: false }
+  const getApiBalance = vi.fn(async (): Promise<BalanceResult> => ({ ok: true, value: null }))
   runtime.remote.provideNamespaces({
     session: { openWorkspacePath: vi.fn(async () => ({ ok: true, value: { opened: true } })) },
+    account: { getApiBalance },
   })
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
@@ -83,7 +89,7 @@ async function bench() {
   const chat = await runtime.mount({ inject: [...injectChat], apply: applyChat })
   const sourceDescriptor = provide.mock.calls[0]?.[0]
   if (sourceDescriptor === undefined) throw new Error('ui-chat did not provide its standard source')
-  return { runtime, conversation, chat, chatSettings, sourceDescriptor }
+  return { runtime, conversation, chat, chatSettings, sourceDescriptor, getApiBalance }
 }
 
 function storeOf(runtime: SlotTestRuntime, key: 'conversation.session' | 'conversation.session.header' | 'conversation.view') {
@@ -128,7 +134,7 @@ describe('Chat apply wiring', () => {
     expect(b.runtime.slots.spec('conversation.chat.node'))
       .toMatchObject({ kind: 'keyed', scope: 'session' })
     expect(b.runtime.slots.entries('conversation.composer.dock').map(row => row.options.id))
-      .toEqual(['activity', 'usage'])
+      .toEqual(['activity', 'usage', 'balance'])
     expect(b.runtime.slots.entries('settings.general.item').map(row => row.options.id))
       .toEqual(['transcript-view', 'link-opening', 'composer-enter', 'performance-usage'])
     await b.runtime.dispose()
@@ -145,9 +151,72 @@ describe('Chat apply wiring', () => {
       b.runtime.slots.entriesOfSlot('conversation.composer.dock')
         .map((entry): [string, unknown] => [entry.options.id ?? '', entry.component]),
     )
-    expect(winners()).toEqual({ activity: PluginActivity, usage: UsagePill })
+    expect(winners()).toEqual({ activity: PluginActivity, usage: UsagePill, balance: BalancePill })
     dispose()
-    expect(winners()).toEqual({ activity: ActivityPill, usage: UsagePill })
+    expect(winners()).toEqual({ activity: ActivityPill, usage: UsagePill, balance: BalancePill })
+  })
+
+  it('refreshes the wallet balance once at boot and once per live settled turn', async () => {
+    const b = await bench()
+    onTestFinished(() => b.runtime.dispose())
+    expect(b.getApiBalance).toHaveBeenCalledTimes(1)
+    await b.runtime.sessions.add({ id: SID })
+    using reference = b.runtime.sessions.retain(SID)
+    b.sourceDescriptor.resolve(reference.binding)
+    const turnEnd = (seq: number): SessionLiveEventEntry => ({
+      type: 'event', event: {
+        type: 'turn/end', seq: seq as SessionSeq, time: seq,
+        data: { turn: 0, reason: { kind: 'completed' } },
+      },
+    })
+    await b.runtime.sessions.appendEvent(SID, turnEnd(0))
+    expect(b.getApiBalance).toHaveBeenCalledTimes(2)
+    // History replacement must not count as a settled turn.
+    await b.runtime.sessions.replaceEvents(SID, [turnEnd(1)])
+    expect(b.getApiBalance).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the last wallet reading across failed, superseded, and unrelated refreshes', async () => {
+    const b = await bench()
+    onTestFinished(() => b.runtime.dispose())
+    const settle = () => new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+    const reading: ApiBalanceView = {
+      currency: 'CNY', total: '5.00', granted: null, toppedUp: null, isAvailable: true, fetchedAt: 1,
+    }
+    const balanceFace = (): { hooks: { balance: { getSnapshot(): ApiBalanceView | null } } } => {
+      const row = b.runtime.slots.entries('conversation.composer.dock').find(entry => entry.options.id === 'balance')
+      const inject = row?.inject as (() => { hooks: { balance: { getSnapshot(): ApiBalanceView | null } } }) | undefined
+      if (inject === undefined) throw new Error('ui-chat did not register the balance pill')
+      return inject()
+    }
+    expect(balanceFace().hooks.balance.getSnapshot()).toBeNull()
+    // A transport drop on the connection-generation refresh keeps the last reading.
+    b.getApiBalance.mockRejectedValueOnce(new Error('transport drop'))
+    b.runtime.ctx.emit('connection/reset')
+    await settle()
+    expect(balanceFace().hooks.balance.getSnapshot()).toBeNull()
+    // A superseded read never lands; the newer one does.
+    let releaseSuperseded: ((result: { ok: true; value: ApiBalanceView | null }) => void) | undefined
+    b.getApiBalance.mockImplementationOnce(() => new Promise((resolve) => { releaseSuperseded = resolve }))
+    b.getApiBalance.mockResolvedValueOnce({ ok: true, value: reading })
+    b.runtime.ctx.emit('connection/reset')
+    b.runtime.ctx.emit('connection/reset')
+    await settle()
+    releaseSuperseded?.({ ok: true, value: reading })
+    await settle()
+    expect(balanceFace().hooks.balance.getSnapshot()).toEqual(reading)
+    // A refused call and an appended non-terminal event change nothing.
+    b.getApiBalance.mockResolvedValueOnce({ ok: false })
+    b.runtime.ctx.emit('connection/reset')
+    await settle()
+    expect(balanceFace().hooks.balance.getSnapshot()).toEqual(reading)
+    await b.runtime.sessions.add({ id: SID })
+    using reference = b.runtime.sessions.retain(SID)
+    b.sourceDescriptor.resolve(reference.binding)
+    await b.runtime.sessions.appendEvent(SID, { type: 'event', event: {
+      type: 'turn/start', seq: 2 as SessionSeq, time: 2, data: { turn: 1 },
+    } })
+    expect(b.getApiBalance).toHaveBeenCalledTimes(5)
   })
 
   it.each([
@@ -185,7 +254,8 @@ describe('Chat apply wiring', () => {
     b.chatSettings.publish({ value: { linkOpening: 'sidebar', transcriptView: 'compact', performanceUsage: 'compact' } })
     expect(face.hooks.performanceUsage.getSnapshot()).toBe('compact')
     for (const entry of [
-      ...b.runtime.slots.entries('conversation.composer.dock'),
+      // The balance pill consumes the wallet reading, not the performance mode.
+      ...b.runtime.slots.entries('conversation.composer.dock').filter(entry => entry.options.id !== 'balance'),
       b.runtime.slots.entries('conversation.chat.node').find(entry => entry.options.key === 'turn-tail')!,
     ]) {
       const injected = (entry.inject as () => Pick<PerformanceUsageRowInjected, 'hooks'>)()
