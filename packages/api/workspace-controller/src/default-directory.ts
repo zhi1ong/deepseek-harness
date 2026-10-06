@@ -28,7 +28,22 @@ export function validateDocumentsDirectory(directory: string, platform: NodeJS.P
 }
 
 /**
+ * Read the deployment override from `DSH_DOCUMENTS_DIRECTORY`, winning over
+ * the OS lookup but not over explicit row config.
+ * @returns the configured directory, or undefined when unset or blank.
+ */
+function envDocumentsDirectory(): string | undefined {
+  const value = process.env.DSH_DOCUMENTS_DIRECTORY
+  return value === undefined || value.trim() === '' ? undefined : value
+}
+
+/**
  * Resolve the first-use directory on the Host without creating files.
+ * Precedence: explicit `documentsDirectory` row config, then the
+ * `DSH_DOCUMENTS_DIRECTORY` environment variable, then the OS Documents
+ * lookup. A lookup failure (headless hosts without desktop user dirs)
+ * falls back to the filesystem root so the first-use workspace stays
+ * creatable.
  * @param documentsDirectory - explicit deployment override for the system Documents directory.
  * @param signal - caller lifetime and lookup deadline.
  * @param internals - platform facts and native command runner.
@@ -42,34 +57,39 @@ export async function defaultWorkspaceDirectory(
   const platform = internals.platform ?? process.platform
   const paths = platform === 'win32' ? win32 : posix
   signal.throwIfAborted()
-  let directory = documentsDirectory
+  let directory = documentsDirectory ?? envDocumentsDirectory()
   if (directory === undefined) {
     const run = internals.run ?? runNativeCommand
-    let stdout: string
-    switch (platform) {
-      case 'darwin':
-        ({ stdout } = await run('osascript', [
-          '-e', 'POSIX path of (path to documents folder from user domain without folder creation)',
-        ], signal, 'hidden'))
-        break
-      case 'win32':
-        ({ stdout } = await run('powershell.exe', [
-          '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-          '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); '
-          + '[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments, '
-          + '[Environment+SpecialFolderOption]::DoNotVerify)',
-        ], signal, 'hidden'))
-        break
-      case 'linux':
-        ({ stdout } = await run('xdg-user-dir', ['DOCUMENTS'], signal, 'hidden'))
-        break
-      default:
-        throw new Error(`system Documents directory is unavailable on ${platform}`)
-    }
-    directory = stdout.replace(/[\r\n]+$/, '')
-    // XDG reports the home directory when this user directory is disabled.
-    if (directory === '' || (platform === 'linux' && paths.normalize(directory) === (internals.home ?? homedir()))) {
-      throw new Error('system Documents directory is unavailable')
+    try {
+      let stdout: string
+      switch (platform) {
+        case 'darwin':
+          ({ stdout } = await run('osascript', [
+            '-e', 'POSIX path of (path to documents folder from user domain without folder creation)',
+          ], signal, 'hidden'))
+          break
+        case 'win32':
+          ({ stdout } = await run('powershell.exe', [
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+            '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); '
+            + '[Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments, '
+            + '[Environment+SpecialFolderOption]::DoNotVerify)',
+          ], signal, 'hidden'))
+          break
+        case 'linux':
+          ({ stdout } = await run('xdg-user-dir', ['DOCUMENTS'], signal, 'hidden'))
+          break
+        default:
+          throw new Error(`system Documents directory is unavailable on ${platform}`)
+      }
+      directory = stdout.replace(/[\r\n]+$/, '')
+      // XDG reports the home directory when this user directory is disabled.
+      if (directory === '' || (platform === 'linux' && paths.normalize(directory) === (internals.home ?? homedir()))) {
+        throw new Error('system Documents directory is unavailable')
+      }
+    } catch (error) {
+      if (signal.aborted) throw error
+      directory = '/'
     }
   }
   directory = validateDocumentsDirectory(directory, platform)
