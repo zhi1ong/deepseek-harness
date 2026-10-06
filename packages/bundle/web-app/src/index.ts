@@ -203,6 +203,21 @@ export function apply(ctx: Context, config: Config): void {
   /** The advertised root: the canonical `publicUrl`, or the listener's own origin. */
   const appRootUrl = (): string => publicUrl ?? ctx.webServer.getOrigin()
   ctx.provide('webApp', { getAdvertisedUrl: appRootUrl } satisfies WebApp)
+  // Unauthenticated liveness probe for supervisors (container healthchecks,
+  // load balancers): the body carries no state beyond reachability.
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/healthz',
+    handler: (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { allow: 'GET, HEAD', 'cache-control': 'no-store' })
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' })
+      res.end(req.method === 'HEAD' ? undefined : 'ok')
+    },
+  }), 'web-app: healthz liveness route')
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['shellEnv'], (runtimeCtx) => {
