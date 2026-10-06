@@ -21,20 +21,32 @@ describe('system Documents directory', () => {
     expect(run).not.toHaveBeenCalled()
   })
 
-  it.each(['', '\r\n', '/home/a\n'])('rejects an unavailable XDG directory %j', async (stdout) => {
+  it.each(['', '\r\n', '/home/a\n'])('falls back to the filesystem root for an unavailable XDG directory %j', async (stdout) => {
     const run: NativeCommandRunner = async () => ({ stdout, stderr: '' })
     await expect(defaultWorkspaceDirectory(undefined, new AbortController().signal, { platform: 'linux', home: '/home/a', run }))
-      .rejects.toThrow('unavailable')
+      .resolves.toBe('/deepseek-harness/default-workspace')
   })
 
-  it('propagates lookup failure and cancellation', async () => {
+  it('falls back to the filesystem root on lookup failure, and still rejects cancellation', async () => {
     const run: NativeCommandRunner = async () => { throw new Error('lookup denied') }
     await expect(defaultWorkspaceDirectory(undefined, new AbortController().signal, { platform: 'darwin', run }))
-      .rejects.toThrow('lookup denied')
+      .resolves.toBe('/deepseek-harness/default-workspace')
     await expect(defaultWorkspaceDirectory('/documents', AbortSignal.abort(), { platform: 'linux' }))
       .rejects.toThrow()
     await expect(defaultWorkspaceDirectory(undefined, new AbortController().signal, { platform: 'freebsd' }))
-      .rejects.toThrow('unavailable')
+      .resolves.toBe('/deepseek-harness/default-workspace')
+  })
+
+  it('seeds the directory from DSH_DOCUMENTS_DIRECTORY before any lookup', async () => {
+    vi.stubEnv('DSH_DOCUMENTS_DIRECTORY', '/data')
+    try {
+      const run = vi.fn<NativeCommandRunner>()
+      await expect(defaultWorkspaceDirectory(undefined, new AbortController().signal, { platform: 'linux', run }))
+        .resolves.toBe('/data/deepseek-harness/default-workspace')
+      expect(run).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.each(['relative', 'C:relative', '\\rooted'])('rejects a Windows path without a fully qualified root: %s', (path) => {
