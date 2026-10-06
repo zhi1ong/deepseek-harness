@@ -11,7 +11,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, WEB_STARTUP_SERVICE, type WebStartupValues } from '../src/startup.ts'
 
 /** What one fixture boot observed. */
@@ -141,12 +141,27 @@ describe('web command-line provider', () => {
     expect(observed.exits).toEqual([1])
   })
 
-  it('rejects the intentionally unsupported all-interfaces host before the consumer activates', async () => {
+  it('publishes the all-interfaces host for container deployments', async () => {
     const { values, observed } = await bootProvider(['--host', '0.0.0.0'])
-    expect(observed.out).toContain('--host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
-    expect(values).toBeUndefined()
-    expect(observed.readerConfig).toBeUndefined()
-    expect(observed.exits).toEqual([1])
+    expect(values).toEqual({ openBrowser: true, host: '0.0.0.0', trustedHosts: [] })
+    expect(observed.readerConfig).toEqual({ ...values, port: 3080 })
+    expect(observed.exits).toEqual([])
+  })
+
+  it('seeds public-url and trusted-hosts from the environment when the command line names none', async () => {
+    vi.stubEnv('DSH_PUBLIC_URL', 'http://nas.example:20029/')
+    vi.stubEnv('DSH_TRUSTED_HOSTS', 'nas.example, 10.0.0.10')
+    try {
+      const { values, observed } = await bootProvider([])
+      expect(values).toEqual({
+        openBrowser: true,
+        publicUrl: 'http://nas.example:20029/',
+        trustedHosts: ['nas.example', '10.0.0.10'],
+      })
+      expect(observed.exits).toEqual([])
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('publishes --public-url as advertisement only, leaving the fence to --trusted-host', async () => {

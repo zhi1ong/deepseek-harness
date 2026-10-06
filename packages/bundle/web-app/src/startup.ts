@@ -3,7 +3,9 @@
  * family (`--host`, `--port`, `--public-url`, `--trusted-host`, `--no-open`)
  * and its `--help` text, then provides the immutable values as
  * {@link WEB_STARTUP_SERVICE}. Ordinary rows inject that service before
- * reading it from lazy config.
+ * reading it from lazy config. `DSH_PUBLIC_URL` and `DSH_TRUSTED_HOSTS`
+ * (comma/space separated) seed the corresponding flags when the command line
+ * names none, so container deployments configure through the environment.
  * @module @deepseek-ai/dsh-web-app/startup
  */
 
@@ -47,6 +49,19 @@ interface WebOptions {
   trustedHost?: string[]
 }
 
+/** Read one non-empty environment string, or undefined. */
+function envString(name: string): string | undefined {
+  const value = process.env[name]
+  return value === undefined || value === '' ? undefined : value
+}
+
+/** Split `DSH_TRUSTED_HOSTS` on commas, semicolons, and whitespace. */
+function envTrustedHosts(): string[] {
+  const raw = process.env.DSH_TRUSTED_HOSTS
+  if (raw === undefined || raw.trim() === '') return []
+  return raw.split(/[,;\s]+/).filter(entry => entry !== '')
+}
+
 /**
  * This app's command: its flags, its description, and its help text.
  * @returns a fresh program, so one process can parse more than once (tests).
@@ -73,24 +88,23 @@ Examples:
 
 /**
  * Parse and provide the Web invocation as an ordinary Cordis service. The
- * command's action publishes the flags this invocation named; `--host 0.0.0.0`,
- * a non-numeric `--port`, or a malformed `--public-url` is a usage error, so on
- * rejection (and on `--help`) nothing is provided.
+ * command's action publishes the flags this invocation named; a non-numeric
+ * `--port` or a malformed `--public-url` (flag or `DSH_PUBLIC_URL`) is a usage
+ * error, so on rejection (and on `--help`) nothing is provided.
  * @param ctx - plugin context carrying the command line.
  */
 export function apply(ctx: Context): void {
   const program = webCommand()
   program.action(() => {
     const options = program.opts<WebOptions>()
-    if (options.host === '0.0.0.0') {
-      program.error('error: --host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
-    }
     if (options.port !== undefined && !/^\d+$/.test(options.port)) {
       program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
     }
-    if (options.publicUrl !== undefined) {
+    const publicUrl = options.publicUrl ?? envString('DSH_PUBLIC_URL')
+    if (publicUrl !== undefined) {
+      const label = options.publicUrl !== undefined ? '--public-url' : 'DSH_PUBLIC_URL'
       try {
-        parsePublicUrl(options.publicUrl, '--public-url')
+        parsePublicUrl(publicUrl, label)
       } catch (error) {
         program.error(`error: ${(error as Error).message}`)
       }
@@ -99,8 +113,8 @@ export function apply(ctx: Context): void {
       openBrowser: options.open,
       ...options.host !== undefined && { host: options.host },
       ...options.port !== undefined && { port: Number(options.port) },
-      ...options.publicUrl !== undefined && { publicUrl: options.publicUrl },
-      trustedHosts: options.trustedHost ?? [],
+      ...publicUrl !== undefined && { publicUrl },
+      trustedHosts: [...options.trustedHost ?? [], ...envTrustedHosts()],
     } satisfies WebStartupValues)
   })
   parseCmdline(ctx, program)
