@@ -173,9 +173,9 @@ Usage: dsh --profile web [options]
 Serve the DeepSeek Harness browser UI.
 
 Options:
-  --host <host>                  bind address: one concrete IPv4 or IPv6 literal
-                                 of a local interface; wildcard addresses are
-                                 rejected
+  --host <host>                  bind address: a concrete IPv4 or IPv6 literal
+                                 of a local interface, or a wildcard address for
+                                 container deployments
   --no-open                      do not open the Web UI in the default browser
   --port <port>                  listen port; pass 0 to let the OS pick a free
                                  one

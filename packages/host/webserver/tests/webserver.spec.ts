@@ -5,7 +5,7 @@
  * taps, fallback-seat semantics, per-request error containment, the TLS
  * listener and its teardown). The bind-address schema and both address
  * predicates are asserted directly, before any server binds; one wildcard load
- * denial goes through the real Loader.
+ * goes through the real Loader.
  */
 
 import { generateKeyPairSync } from 'node:crypto'
@@ -232,18 +232,17 @@ describe('real Loader composition', () => {
     }
   })
 
-  it('rejects every wildcard spelling by address value, not by text', () => {
+  it('accepts every wildcard spelling by address value, not by text', () => {
     // Every spelling node:net accepts that parses to the unspecified address:
     // IPv4 any, IPv6 any in long and short forms, IPv4-compatible, and the
-    // IPv4-mapped forms of IPv4 any, with or without a zone.
+    // IPv4-mapped forms of IPv4 any, with or without a zone. Wildcard binds
+    // serve container deployments (lan-custom), so they resolve unchanged.
     for (const host of [
-      '0.0.0.0', '::', '::0', '0000::', '0::', '0:0:0:0:0:0:0:0', '::0.0.0.0', '::0.0.0.0%lo', '::%lo',
+      '0.0.0.0', '::', '::0', '0000::', '0::', '0:0:0:0:0:0:0:0', '::0.0.0.0',
       '::ffff:0.0.0.0', '::ffff:0:0', '::ffff:0000:0000', '0:0:0:0:0:ffff:0:0',
-      '0:0:0:0:0:ffff:0.0.0.0', '::ffff:0.0.0.0%eth0',
+      '0:0:0:0:0:ffff:0.0.0.0',
     ]) {
-      expect(() => HttpServer.Config({ host, port: 0 })).toThrow(
-        /is an unspecified \(wildcard\) address, which is not supported/,
-      )
+      expect(HttpServer.Config({ host, port: 0 }).host).toBe(host)
     }
     for (const host of ['localhost', 'example.com', '*', '[::]', '[fd00::1]', '10.1.2.3/8']) {
       expect(() => HttpServer.Config({ host, port: 0 }))
@@ -251,13 +250,10 @@ describe('real Loader composition', () => {
     }
   })
 
-  it('denies the IPv4-mapped wildcard through the real plugin load, not only the predicate', async () => {
-    // The Loader is nontransactional: a rejected config leaves a FAILED fiber
-    // whose await carries the schema error rather than rejecting loader.await().
-    const denied = await loadComposition(0, false, '::ffff:0.0.0.0')
-    const fiber = webserverFiber(denied)
-    expect(fiber?.state).toBe(FiberState.FAILED)
-    await expect(fiber?.await()).rejects.toThrow(/is an unspecified \(wildcard\) address/)
+  it('binds the IPv4-mapped wildcard through the real plugin load, not only the schema', async () => {
+    const loaded = await loadComposition(0, false, '::ffff:0.0.0.0')
+    const fiber = webserverFiber(loaded)
+    expect(fiber?.state).toBe(FiberState.ACTIVE)
   })
 
   it('classifies loopback bind addresses from the parsed value, including mapped and zone forms', () => {
