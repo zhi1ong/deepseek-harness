@@ -248,6 +248,21 @@ export function apply(ctx: Context, config: Config): void {
   const handoffBrowser = config.openBrowser && !launchedThroughSsh(launchEnvironmentOf(ctx))
   // Release dependent rows only after bind-dependent trust has been sampled once.
   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
+  // Unauthenticated liveness probe for supervisors (container healthchecks,
+  // load balancers): the body carries no state beyond reachability.
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/healthz',
+    handler: (req, res) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { allow: 'GET, HEAD', 'cache-control': 'no-store' })
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' })
+      res.end(req.method === 'HEAD' ? undefined : 'ok')
+    },
+  }), 'web-app: healthz liveness route')
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
