@@ -3,14 +3,16 @@
  * family (`--host`, `--port`, `--public-url`, `--trusted-host`, `--no-open`, TLS)
  * and its `--help` text, then provides the immutable values as
  * {@link WEB_STARTUP_SERVICE}. Ordinary rows inject that service before
- * reading it from lazy config.
+ * reading it from lazy config. `DSH_PUBLIC_URL` and `DSH_TRUSTED_HOSTS`
+ * (comma/space separated) seed the corresponding flags when the command line
+ * names none, so container deployments configure through the environment.
  * @module @deepseek-ai/dsh-web-app/startup
  */
 
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
-import { isWildcardHost, type TlsConfig } from '@deepseek-ai/dsh-host-webserver'
+import type { TlsConfig } from '@deepseek-ai/dsh-host-webserver'
 import { parsePublicUrl } from './public-url.ts'
 
 /** Stable Cordis plugin name. */
@@ -52,6 +54,19 @@ interface WebOptions {
   tlsKey?: string
 }
 
+/** Read one non-empty environment string, or undefined. */
+function envString(name: string): string | undefined {
+  const value = process.env[name]
+  return value === undefined || value === '' ? undefined : value
+}
+
+/** Split `DSH_TRUSTED_HOSTS` on commas, semicolons, and whitespace. */
+function envTrustedHosts(): string[] {
+  const raw = process.env.DSH_TRUSTED_HOSTS
+  if (raw === undefined || raw.trim() === '') return []
+  return raw.split(/[,;\s]+/).filter(entry => entry !== '')
+}
+
 /**
  * This app's command: its flags, its description, and its help text.
  * @returns a fresh program, so one process can parse more than once (tests).
@@ -61,7 +76,7 @@ function webCommand(): Command {
     .name('dsh --profile web')
     .description('Serve the DeepSeek Harness browser UI.')
     .helpOption('-h, --help', 'show this help')
-    .option('--host <host>', 'bind address: one concrete IPv4 or IPv6 literal of a local interface; wildcard addresses are rejected')
+    .option('--host <host>', 'bind address: a concrete IPv4 or IPv6 literal of a local interface, or a wildcard address for container deployments')
     .option('--no-open', 'do not open the Web UI in the default browser')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
     .option('--public-url <url>', 'advertise this HTTP(S) root in the printed, opened, runtime-context, and DSH_WEB_URL forms; grants no trust')
@@ -92,9 +107,6 @@ export function apply(ctx: Context): void {
   const program = webCommand()
   program.action(() => {
     const options = program.opts<WebOptions>()
-    if (options.host !== undefined && isWildcardHost(options.host)) {
-      program.error(`error: --host ${options.host} is an unspecified (wildcard) address, which is not supported: binding every interface would expose remote code execution to the network; bind one concrete IPv4 or IPv6 address instead`)
-    }
     if (options.port !== undefined && !/^\d+$/.test(options.port)) {
       program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
     }
@@ -104,9 +116,11 @@ export function apply(ctx: Context): void {
     } else if (options.tlsCert !== undefined || options.tlsKey !== undefined) {
       program.error('error: --tls-cert and --tls-key must be supplied together')
     }
-    if (options.publicUrl !== undefined) {
+    const publicUrl = options.publicUrl ?? envString('DSH_PUBLIC_URL')
+    if (publicUrl !== undefined) {
+      const label = options.publicUrl !== undefined ? '--public-url' : 'DSH_PUBLIC_URL'
       try {
-        parsePublicUrl(options.publicUrl, '--public-url')
+        parsePublicUrl(publicUrl, label)
       } catch (error) {
         program.error(`error: ${(error as Error).message}`)
       }
@@ -115,9 +129,9 @@ export function apply(ctx: Context): void {
       openBrowser: options.open,
       ...options.host !== undefined && { host: options.host },
       ...options.port !== undefined && { port: Number(options.port) },
-      ...options.publicUrl !== undefined && { publicUrl: options.publicUrl },
+      ...publicUrl !== undefined && { publicUrl },
       ...tls !== undefined && { tls },
-      trustedHosts: options.trustedHost ?? [],
+      trustedHosts: [...options.trustedHost ?? [], ...envTrustedHosts()],
     } satisfies WebStartupValues)
   })
   parseCmdline(ctx, program)
