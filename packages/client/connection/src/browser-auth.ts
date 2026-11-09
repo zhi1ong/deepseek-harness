@@ -3,6 +3,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { PeerId } from '@deepseek-ai/dsh-typert-protocol'
 import { CONNECT_PATH, type ConnectionInteractions } from './connect-protocol.ts'
+import { LOGIN_PAGE_CONTENT_SECURITY_POLICY, loginPageLocale, renderLoginPage } from './login-page.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import type {
@@ -135,7 +136,7 @@ function sessionCookie(
   maxAgeSeconds: number,
   secure: boolean,
 ): string {
-  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`
+  const attributes = `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Lax`
   return secure ? `${attributes}; Secure` : attributes
 }
 
@@ -253,8 +254,8 @@ export class BrowserAuth {
   /**
    * Authenticate an index request. A valid root query token mints the cookie
    * and redirects to the directory-relative clean `./`; a valid cookie lets
-   * the caller serve the index; every other request receives the same minimal
-   * 401 response.
+   * the caller serve the index; every other request receives a 401 token login
+   * page, marked invalid when the request carried a token the exchange refused.
    * @param req - incoming root or configured-index request.
    * @param res - response owned when this method returns false.
    * @param secure - whether the listener receiving this request serves TLS; the
@@ -299,11 +300,11 @@ export class BrowserAuth {
         res.end()
         return false
       }
-      this.writeUnauthorized(req, res)
+      this.writeLoginPage(req, res, true)
       return false
     }
     if (this.isAuthenticated(req, secure)) return true
-    this.writeUnauthorized(req, res)
+    this.writeLoginPage(req, res, false)
     return false
   }
 
@@ -393,5 +394,26 @@ export class BrowserAuth {
     res.end(req.method === 'HEAD'
       ? undefined
       : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
+  }
+
+  /**
+   * Answer an unauthenticated index request with the token login page.
+   * @param req - the refused index request; its `Accept-Language` picks the page language.
+   * @param res - response owned to completion.
+   * @param invalid - whether the request carried a token the exchange refused.
+   */
+  private writeLoginPage(req: ConnectionIndexRequest, res: ConnectionIndexResponse, invalid: boolean): void {
+    res.writeHead(401, {
+      'cache-control': 'no-store',
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': LOGIN_PAGE_CONTENT_SECURITY_POLICY,
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+    })
+    res.end(req.method === 'HEAD' ? undefined : renderLoginPage({
+      locale: loginPageLocale(header(req.headers, 'accept-language')),
+      invalid,
+      rememberDays: Math.floor(this.maxAgeMilliseconds / DAY_MILLISECONDS),
+    }))
   }
 }

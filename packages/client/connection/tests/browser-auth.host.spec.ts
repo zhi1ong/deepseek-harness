@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { PeerId } from '@deepseek-ai/dsh-typert-protocol'
 import { BrowserAuth } from '../src/browser-auth.ts'
+import { LOGIN_PAGE_CONTENT_SECURITY_POLICY, renderLoginPage } from '../src/login-page.ts'
 import type { ConnectionIndexRequest, ConnectionIndexResponse } from '../src/rpc.ts'
 import { RecordCredentials } from './browser-credentials.ts'
 
@@ -108,6 +109,19 @@ describe('API credentials', () => {
     expect(publish).not.toHaveBeenCalled()
   })
 
+  it('refuses a HEAD connect without a body', async () => {
+    const auth = await createAuth(new RecordCredentials())
+    const publish = vi.fn(() => 'api-operator' as PeerId)
+    const res = response()
+
+    auth.authorizeConnect(request('/connect', 'localhost', { method: 'HEAD' }), res.value, false, publish)
+
+    expect(res.state.status).toBe(401)
+    expect(res.state.headers?.['content-type']).toBe('text/plain; charset=utf-8')
+    expect(res.state.body).toBeUndefined()
+    expect(publish).not.toHaveBeenCalled()
+  })
+
   it('signs the published id and rejects browser confusion, tampering, audience mismatch, and expiry', async () => {
     vi.useFakeTimers()
     const store = new RecordCredentials()
@@ -174,7 +188,7 @@ describe('BrowserAuth', () => {
         'referrer-policy': 'no-referrer',
       },
     })
-    expect(login.state.headers?.['set-cookie']).toMatch(/; Max-Age=2592000; Path=\/; Expires=.*; HttpOnly; SameSite=Strict$/u)
+    expect(login.state.headers?.['set-cookie']).toMatch(/; Max-Age=2592000; Path=\/; Expires=.*; HttpOnly; SameSite=Lax$/u)
     expect(login.state.headers?.['set-cookie']).not.toContain('Secure')
     expect(first.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: login.cookie }))).toBe(true)
     expect(first.isAuthenticated({
@@ -260,31 +274,51 @@ describe('BrowserAuth', () => {
     ))).toBe(true)
   })
 
-  it('accepts the cookie for index serving and gives every unauthenticated request one response', async () => {
-    const auth = await createAuth(new RecordCredentials())
+  it('accepts the cookie for index serving and answers every unauthenticated request with the login page', async () => {
+    const auth = await createAuth(new RecordCredentials(), 365)
     const { cookie } = exchange(auth)
     const allowed = response()
     expect(auth.authorizeIndex(request('/index.html', '127.0.0.1:3080', { cookie }), allowed.value)).toBe(true)
     expect(allowed.state).toEqual({})
 
-    for (const candidate of [
-      request('/'),
-      request('/?token=wrong'),
-      request('/?token=wrong&token=again'),
-      request('/index.html?token=wrong'),
-      request(auth.authenticatedUrl('http://127.0.0.1:3080'), '127.0.0.1:3080', { method: 'HEAD' }),
-    ]) {
+    for (const [candidate, invalid] of [
+      [request('/'), false],
+      [request('/?token=wrong'), true],
+      [request('/?token=wrong&token=again'), true],
+      [request('/index.html?token=wrong'), true],
+      [request(auth.authenticatedUrl('http://127.0.0.1:3080'), '127.0.0.1:3080', { method: 'HEAD' }), true],
+    ] as const) {
       const denied = response()
       expect(auth.authorizeIndex(candidate, denied.value)).toBe(false)
       expect(denied.state.status).toBe(401)
       expect(denied.state.headers).toEqual({
         'cache-control': 'no-store',
-        'content-type': 'text/plain; charset=utf-8',
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': LOGIN_PAGE_CONTENT_SECURITY_POLICY,
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
       })
-      expect(denied.state.body).toBe(candidate.method === 'HEAD'
-        ? undefined
-        : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
+      if (candidate.method === 'HEAD') {
+        expect(denied.state.body).toBeUndefined()
+        continue
+      }
+      expect(denied.state.body).toBe(renderLoginPage({ locale: 'en', invalid, rememberDays: 365 }))
+      // A refused token is never written back into the page.
+      expect(denied.state.body).not.toContain('wrong')
     }
+  })
+
+  it('renders the login page in the browser language with the configured cookie lifetime', async () => {
+    const auth = await createAuth(new RecordCredentials(), 45)
+    const denied = response()
+    const chinese: ConnectionIndexRequest = {
+      method: 'GET',
+      url: '/',
+      headers: { 'host': '127.0.0.1:3080', 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' },
+    }
+    expect(auth.authorizeIndex(chinese, denied.value)).toBe(false)
+    expect(denied.state.body).toBe(renderLoginPage({ locale: 'zh', invalid: false, rememberDays: 45 }))
+    expect(denied.state.body).toContain('45 天内无需再次输入')
   })
 
   it('rejects tampering, expiry, future issuance, and a longer lifetime than configured', async () => {

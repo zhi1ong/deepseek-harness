@@ -14,6 +14,8 @@
     "src/connect-protocol.ts",
     "src/http-bridge.ts",
     "src/index.ts",
+    "src/login-page.ts",
+    "src/login-wordmark.ts",
     "src/loopback-hostname.ts",
     "src/peer.ts",
     "src/recovery-config.ts",
