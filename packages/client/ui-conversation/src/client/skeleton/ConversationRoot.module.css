@@ -499,6 +499,24 @@
   scrollbar-gutter: stable;
 }
 
+/* Touch: WebKit's elastic overscroll moves a sticky seat with the scrolled
+   content, lifting the input card off the column floor. The seat anchors to
+   the non-scrolling body instead, and the scroll body reserves its observed
+   height so the transcript end still clears it. Fine pointers keep the sticky
+   seat so wheel over the footer moves the flow. */
+@media (pointer: coarse) {
+  .body[data-content-phase='active'] > .scrollBody:not(:has([data-conversation-composer-overlay])) {
+    padding-bottom: var(--dsh-composer-height, 152px);
+  }
+
+  .body[data-content-phase='active'] > .scrollBody:not(:has([data-conversation-composer-overlay])) > .composerSeat {
+    position: absolute;
+    right: 2px;
+    bottom: 0;
+    left: 0;
+  }
+}
+
 /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
    offset. WebKit-only: the Firefox path has no track to inset. */
 .scrollBody::-webkit-scrollbar-track {
