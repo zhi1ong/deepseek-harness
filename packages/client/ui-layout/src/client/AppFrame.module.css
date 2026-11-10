@@ -323,6 +323,27 @@
   pointer-events: auto;
 }
 
+/* Swipe-open strip of a closed drawer: 20px along the left edge, below the
+   leading seat (15) so the reopen control keeps its taps. The strip is not
+   inside any scroller, so a touch that starts on it scrolls nothing, and it
+   prevents the default action of its touches, withholding them from the
+   browser's edge navigation where the platform lets a page do so. Only a
+   coarse primary pointer gets it; a mouse keeps every click at the edge. */
+.drawerEdge {
+  position: absolute;
+  inset: var(--dsh-frame-chrome-top, 0px) auto 0 0;
+  z-index: 14;
+  width: 20px;
+  pointer-events: none;
+  touch-action: none;
+}
+
+@media (pointer: coarse) {
+  .drawerEdge {
+    pointer-events: auto;
+  }
+}
+
 .frame[data-sidebar-drawer] .leadingSeat {
   top: 11px;
   left: 12px;

@@ -796,4 +796,61 @@ describe('sidebar drawer', () => {
     expect(sidebarOwner().collapsed).toBe(true)
     expect(tracks(frame)).toEqual([0, 0])
   })
+
+  it('opens from an edge-strip swipe and closes from a swipe on the open drawer, like the opener and mask', () => {
+    frameWidth = 390
+    const { frame, sidebarOwner, getByTestId } = mountFrame()
+    const sidebar = getByTestId('sidebar-content')
+    const edge = frame.querySelector('[data-sidebar-edge]')!
+    // The edge strip claims its touches from platform edge navigation.
+    expect(swipe(edge, 5, 20, 200)).toBe(true)
+    expect(sidebarOwner().collapsed).toBe(false)
+    expect(frame.querySelector('[data-sidebar-edge]')).toBeNull()
+    // The drawer is moved only by its own rules, as for the opener.
+    expect(sidebar.parentElement?.getAttribute('style')).toBe('width: 280px;')
+    // Touches on the open drawer keep their default actions, such as taps.
+    expect(swipe(sidebar, 200, 180, 20)).toBe(false)
+    expect(sidebarOwner().collapsed).toBe(true)
+    expect(frame.querySelector('[data-sidebar-edge]')).not.toBeNull()
+    expect(getByTestId('sidebar-content')).toBe(sidebar)
+  })
+
+  it('mounts no edge strip outside drawer mode and stops recognizing swipes when drawer mode ends', () => {
+    const { frame, instance } = mountFrame()
+    expect(frame.querySelector('[data-sidebar-edge]')).toBeNull()
+    resize(767)
+    const edge = frame.querySelector('[data-sidebar-edge]')!
+    touch(edge, 'touchstart', 5)
+    resize(768)
+    expect(frame.querySelector('[data-sidebar-edge]')).toBeNull()
+    touch(edge, 'touchmove', 90)
+    touch(frame, 'touchstart', 300)
+    touch(frame, 'touchmove', 200)
+    expect(instance.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
+  })
 })
+
+/**
+ * Dispatch one single-finger touch event; jsdom keeps the supplied touch records.
+ * @returns whether a listener prevented the event's default action.
+ */
+function touch(target: Element, type: string, clientX: number): boolean {
+  const touches = [{ identifier: 1, clientX, clientY: 300 } as Touch]
+  const event = new TouchEvent(type, {
+    bubbles: true, cancelable: true, changedTouches: touches, touches: type === 'touchstart' || type === 'touchmove' ? touches : [],
+  })
+  act(() => { target.dispatchEvent(event) })
+  return event.defaultPrevented
+}
+
+/**
+ * Drag one finger from `fromX` through `viaX` to `toX` and lift it there.
+ * @returns whether the touch start's default action was prevented.
+ */
+function swipe(target: Element, fromX: number, viaX: number, toX: number): boolean {
+  const claimed = touch(target, 'touchstart', fromX)
+  touch(target, 'touchmove', viaX)
+  touch(target, 'touchmove', toX)
+  touch(target, 'touchend', toX)
+  return claimed
+}

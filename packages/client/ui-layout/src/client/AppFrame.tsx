@@ -21,6 +21,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-slots'
 import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_DRAWER_BREAKPOINT } from './columns.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
+import { attachDrawerSwipe } from './drawer-swipe.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
@@ -285,6 +286,23 @@ export function AppFrame({
   const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
   const leadingMounted = drawer || darwin && sidebarCollapsed
 
+  // A closed drawer takes swipes from its edge strip, which also claims them
+  // from platform edge navigation; an open drawer takes them from the whole
+  // frame, where only the drawer and its mask receive touches.
+  const edgeRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!drawer) return
+    const surface = drawerOpen ? frameRef.current : edgeRef.current
+    /* v8 ignore next -- drawer mode renders the frame and the closed-state edge strip before effects run. */
+    if (surface === null) return
+    return attachDrawerSwipe({
+      surface,
+      claimTouchStart: !drawerOpen,
+      open: drawerOpen,
+      onToggle: () => { actions.toggleSidebar() },
+    })
+  }, [drawer, drawerOpen, actions])
+
   return (
     <div
       ref={frameRef}
@@ -311,6 +329,7 @@ export function AppFrame({
       />
       {drawer && <div className={css.drawerMask} data-sidebar-mask aria-hidden="true"
         onClick={drawerOpen ? () => { actions.toggleSidebar() } : undefined} />}
+      {drawer && sidebarCollapsed && <div ref={edgeRef} className={css.drawerEdge} data-sidebar-edge aria-hidden="true" />}
       <div className={css.sidebarCol}
         style={drawer ? { width: sidebarWidth } : undefined}
         {...{ inert: drawer && sidebarCollapsed ? '' : undefined }}>
