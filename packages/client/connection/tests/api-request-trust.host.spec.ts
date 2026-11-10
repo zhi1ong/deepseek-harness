@@ -87,6 +87,26 @@ describe('isTrustedApiRequest', () => {
     expect(isTrustedApiRequest(request(headers), [])).toBe(false)
   })
 
+  it('admits the declared host:port Origin when a proxy forwards Host without the browser-visible port', () => {
+    const proxied = { host: 'harness.internal', origin: 'https://harness.internal:20029' }
+    expect(isTrustedApiRequest(request(proxied), ['harness.internal:20029'])).toBe(true)
+    expect(isTrustedApiRequest(request({ host: 'harness.internal' }), ['harness.internal:20029'])).toBe(true)
+    // A WebSocket upgrade carries the same headers; a plain-HTTP page Origin matches as well.
+    expect(isTrustedApiRequest(request({ ...proxied, origin: 'http://harness.internal:20029' }), ['harness.internal:20029'])).toBe(true)
+    // Another port on the same hostname receives the same cookies and stays refused.
+    expect(isTrustedApiRequest(request({ ...proxied, origin: 'https://harness.internal:5001' }), ['harness.internal:20029'])).toBe(false)
+    expect(isTrustedApiRequest(request({ ...proxied, origin: 'https://harness.internal' }), ['harness.internal:20029'])).toBe(false)
+    // A port-less entry never admits an Origin that differs from Host.
+    expect(isTrustedApiRequest(request(proxied), ['harness.internal'])).toBe(false)
+    // The relaxed Host match covers only a Host without a port, and only that hostname.
+    expect(isTrustedApiRequest(request({ host: 'harness.internal:9999' }), ['harness.internal:20029'])).toBe(false)
+    expect(isTrustedApiRequest(request({ host: 'evil.example', origin: 'https://harness.internal:20029' }), ['harness.internal:20029'])).toBe(false)
+    expect(isTrustedApiRequest(request({ ...proxied, 'sec-fetch-site': 'cross-site' }), ['harness.internal:20029'])).toBe(false)
+    expect(isTrustedApiRequest(request({ ...proxied, origin: 'null' }), ['harness.internal:20029'])).toBe(false)
+    // A listener serving its own TLS keeps exact-port Host matching.
+    expect(isTrustedApiRequest(request(proxied), ['harness.internal:20029'], undefined, 'https:')).toBe(false)
+  })
+
   it('matches Host, Origin, and trusted entries through WHATWG normalization (case, default port)', () => {
     expect(isTrustedApiRequest(request({ host: 'Harness.INTERNAL:3080', origin: 'http://harness.internal:3080' }), ['harness.internal:3080'])).toBe(true)
     expect(isTrustedApiRequest(request({ host: 'harness.internal', origin: 'http://harness.internal' }), ['HARNESS.internal:80'])).toBe(true)

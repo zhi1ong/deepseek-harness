@@ -68,20 +68,36 @@ function canonicalAuthority(entry: string, entryUrl: URL): string {
   return port === '' ? entryUrl.hostname : `${entryUrl.hostname}:${port}`
 }
 
+/** Whether one entry wrote an explicit port, judged like {@link canonicalAuthority}. */
+function hasExplicitPort(entry: string, entryUrl: URL): boolean {
+  return canonicalAuthority(entry, entryUrl) !== entryUrl.hostname
+}
+
 /**
- * Whether the request authority matches a `trustedHosts` entry. An entry with
- * an explicit port matches that exact authority; a port-less entry matches the
- * hostname on any port. Both sides compare through WHATWG normalization,
- * so case and a redundant scheme-default port never decide trust.
+ * How the request authority matches `trustedHosts`. An entry with an explicit
+ * port matches that exact authority; a port-less entry matches the hostname on
+ * any port. On a plain-HTTP listener, a port-less Host whose hostname an
+ * explicit-port entry names is `proxied`: a reverse proxy dropped the
+ * browser-visible port. Both sides compare through WHATWG normalization.
  */
-function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[], protocol: 'http:' | 'https:'): boolean {
-  return trustedHosts.some((entry) => {
+function trustedAuthorityMatch(
+  hostUrl: URL,
+  trustedHosts: readonly string[],
+  protocol: 'http:' | 'https:',
+): 'direct' | 'proxied' | undefined {
+  let match: 'proxied' | undefined
+  for (const entry of trustedHosts) {
     const entryUrl = parseAuthority(entry, protocol)
-    if (entryUrl === undefined) return false
-    return canonicalAuthority(entry, entryUrl) === entryUrl.hostname
-      ? entryUrl.hostname === hostUrl.hostname
-      : entryUrl.host === hostUrl.host
-  })
+    if (entryUrl === undefined) continue
+    if (!hasExplicitPort(entry, entryUrl)) {
+      if (entryUrl.hostname === hostUrl.hostname) return 'direct'
+    } else if (entryUrl.host === hostUrl.host) {
+      return 'direct'
+    } else if (protocol === 'http:' && hostUrl.port === '' && entryUrl.hostname === hostUrl.hostname) {
+      match = 'proxied'
+    }
+  }
+  return match
 }
 
 /**
@@ -135,19 +151,22 @@ export function isTrustedApiRequest(
   if (host === undefined) return false
   const hostUrl = parseAuthority(host, protocol)
   if (hostUrl === undefined) return false
-  if (!isLoopbackHostname(hostUrl.hostname)
-    && !isTrustedAuthority(hostUrl, trustedHosts, protocol)
-    && !isBindAddressAuthority(hostUrl, bindHost)) return false
+  const hostMatch = isLoopbackHostname(hostUrl.hostname) || isBindAddressAuthority(hostUrl, bindHost)
+    ? 'direct'
+    : trustedAuthorityMatch(hostUrl, trustedHosts, protocol)
+  if (hostMatch === undefined) return false
   // Cross-site fence: modern browsers label the initiator relationship on
   // every fetch; an explicit cross-site marker is refused regardless of Origin.
   if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false
   // Origin fence: when a browser attaches an Origin it must be exactly this
-  // authority (compared through the same normalization as the Host). Absent
+  // authority (compared through the same normalization as the Host) or an
+  // explicit-port `trustedHosts` entry. A proxied Host lacks the port, so
+  // comparing with it would admit every port of the hostname. Absent
   // Origin is fine — the Host fence above already bound the request. The
   // literal "null" (sandboxed iframes, file: pages) is an opaque origin, refused.
   const origin = header(request.headers, 'origin')
   if (origin === undefined) return true
-  return isSameAuthorityOrigin(origin, host)
+  return (hostMatch === 'direct' && isSameAuthorityOrigin(origin, host)) || isDeclaredOrigin(origin, trustedHosts)
 }
 
 /**
@@ -173,4 +192,19 @@ function isSameAuthorityOrigin(origin: string, host: string): boolean {
   if (scheme === undefined) return false
   const hostUrl = parseAuthority(host, scheme)
   return hostUrl !== undefined && originUrl.host === hostUrl.host
+}
+
+/**
+ * Whether the Origin is the exact authority of an explicit-port `trustedHosts`
+ * entry. Port-less entries never admit an Origin: other ports of the hostname
+ * receive the same cookies.
+ * @param origin - verbatim Origin header value.
+ * @param trustedHosts - configured deployment authorities.
+ * @returns true when an explicit-port entry names the Origin's authority.
+ */
+function isDeclaredOrigin(origin: string, trustedHosts: readonly string[]): boolean {
+  return trustedHosts.some((entry) => {
+    const entryUrl = parseAuthority(entry)
+    return entryUrl !== undefined && hasExplicitPort(entry, entryUrl) && isSameAuthorityOrigin(origin, entry)
+  })
 }
